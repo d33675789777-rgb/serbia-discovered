@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="theme-color" content="#26352b">
+<title>SERBIA DISCOVERED — Белград</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+:root{--olive:#26352b;--gold:#b99a62;--paper:#f5f1e8;--ink:#262820;--muted:#77786f}
+*{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font-family:Georgia,serif}
+header{background:var(--olive);color:#fff;padding:22px 20px 18px}
+.brand{font:600 12px Arial,sans-serif;letter-spacing:2px;color:#d9c49b}
+h1{font-size:25px;font-weight:normal;margin:9px 0 4px}
+.sub{font:13px Arial,sans-serif;color:#d8d8ce}
+main{padding:14px;max-width:760px;margin:auto}
+#map{height:270px;border-radius:12px;overflow:hidden;border:1px solid #d7d0c1}
+.status{font:13px Arial,sans-serif;color:var(--muted);padding:10px 2px}
+.controls{display:flex;gap:8px;margin:6px 0 14px}
+button,.linkbtn{border:0;border-radius:9px;padding:13px 14px;font:600 13px Arial,sans-serif;cursor:pointer;text-decoration:none;display:inline-block}
+.primary{background:var(--olive);color:white;flex:1}.secondary{background:#e7dfcf;color:var(--ink)}
+.sectiontitle{font-size:19px;font-weight:normal;margin:18px 0 10px}
+.stop{background:#fffdf8;border:1px solid #e5dece;border-radius:11px;padding:14px;margin:9px 0}
+.stop h3{font-size:17px;font-weight:normal;margin:0 0 5px}
+.stop p{font:12px Arial,sans-serif;color:var(--muted);margin:0 0 11px}
+.row{display:flex;gap:7px;flex-wrap:wrap}.row button{padding:10px 11px}
+.badge{font:11px Arial,sans-serif;color:#75613c}
+.player{margin-top:10px;background:#f1ecdf;padding:12px;border-radius:9px}
+audio{width:100%;margin-top:8px}
+.small{font:11px Arial,sans-serif;color:var(--muted);line-height:1.5;margin:14px 2px}
+</style>
+</head>
+<body>
+<header>
+ <div class="brand">SERBIA DISCOVERED</div>
+ <h1>Исторический центр Белграда</h1>
+ <div class="sub">Тестовая GPS-аудиопрогулка · 4 остановки</div>
+</header>
+<main>
+ <div id="map"></div>
+ <div class="status" id="gpsStatus">Геопозиция пока не запрошена.</div>
+ <div class="controls">
+  <button class="primary" id="locate">Определить моё местоположение</button>
+  <button class="secondary" id="reset">Сбросить тест</button>
+ </div>
+ <h2 class="sectiontitle">Остановки экскурсии</h2>
+ <div id="stops"></div>
+ <p class="small">Тестовый прототип. Для автоматического GPS-срабатывания держите эту страницу открытой и разрешите доступ к геопозиции. Точность GPS зависит от телефона и условий на улице. Аудиофайлы пока демонстрационные — добавим ваши записи позже.</p>
+</main>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+const stops = [
+ {id:"republic",name:"Площадь Республики",subtitle:"Памятник князю Михаилу — GPS-точка",lat:44.81644,lon:20.46011,radius:50,desc:"Площадь, римский Сингидунум, Народный театр и Национальный музей."},
+ {id:"kalemegdan",name:"Центральный вход в Калемегдан",subtitle:"История крепости и парка",lat:44.82017,lon:20.45312,radius:50,desc:"От военного укрепления до главного исторического парка Белграда."},
+ {id:"france",name:"Памятник благодарности Франции",subtitle:"Сербия и Франция в Первой мировой войне",lat:44.82310,lon:20.45080,radius:50,desc:"История памятника и сербско-французских отношений."},
+ {id:"victor",name:"Памятник Победителю",subtitle:"Верхний город Белградской крепости",lat:44.82300,lon:20.44770,radius:50,desc:"История Pobednik и панорама слияния Савы и Дуная."}
+];
+const map=L.map('map').setView([44.8192,20.4545],15);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'© OpenStreetMap'}).addTo(map);
+const markers={};
+stops.forEach((s,i)=>{
+ const m=L.marker([s.lat,s.lon]).addTo(map).bindPopup(`<b>${i+1}. ${s.name}</b><br>${s.subtitle}`);
+ markers[s.id]=m;
+});
+const visited=new Set(JSON.parse(localStorage.getItem("sd_visited")||"[]"));
+let currentAudio=null,watchId=null,lastAuto=null;
+function render(){
+ document.getElementById('stops').innerHTML=stops.map((s,i)=>`
+ <article class="stop">
+  <div class="badge">ОСТАНОВКА ${String(i+1).padStart(2,'0')} · ${visited.has(s.id)?'ПРОСЛУШАНО':'НЕ ПОСЕЩЕНО'}</div>
+  <h3>${s.name}</h3><p>${s.subtitle}</p>
+  <div class="row">
+   <button class="primary" onclick="openStop('${s.id}')">Открыть рассказ</button>
+   <button class="secondary" onclick="navigateTo('${s.id}')">Проложить маршрут</button>
+  </div>
+  <div id="detail-${s.id}"></div>
+ </article>`).join("");
+}
+function openStop(id){
+ const s=stops.find(x=>x.id===id);
+ document.querySelectorAll('[id^="detail-"]').forEach(x=>x.innerHTML="");
+ document.getElementById('detail-'+id).innerHTML=`
+ <div class="player"><b>${s.name}</b><p style="font:13px Arial,sans-serif">${s.desc}</p>
+ <p style="font:12px Arial,sans-serif;color:#777">Аудиофайл будет добавлен после получения вашей записи.</p>
+ <button class="secondary" onclick="markVisited('${id}')">Отметить как прослушанное</button></div>`;
+ map.setView([s.lat,s.lon],17); markers[id].openPopup();
+}
+function markVisited(id){visited.add(id);localStorage.setItem("sd_visited",JSON.stringify([...visited]));render();openStop(id)}
+function navigateTo(id){
+ const s=stops.find(x=>x.id===id);
+ const url=`https://www.google.com/maps/dir/?api=1&destination=${s.lat},${s.lon}&travelmode=walking`;
+ window.open(url,'_blank');
+}
+function distance(a,b,c,d){
+ const R=6371000,rad=x=>x*Math.PI/180;
+ const x=rad(c-a),y=rad(d-b);
+ const h=Math.sin(x/2)**2+Math.cos(rad(a))*Math.cos(rad(c))*Math.sin(y/2)**2;
+ return 2*R*Math.asin(Math.sqrt(h));
+}
+function onPosition(pos){
+ const {latitude,longitude,accuracy}=pos.coords;
+ document.getElementById('gpsStatus').textContent=`Геопозиция определена · точность около ${Math.round(accuracy)} м`;
+ L.circleMarker([latitude,longitude],{radius:7,color:'#9a6f2e'}).addTo(map);
+ const nearby=stops.map(s=>({...s,d:distance(latitude,longitude,s.lat,s.lon)}))
+   .filter(s=>s.d<=s.radius && !visited.has(s.id));
+ if(nearby.length){
+  const s=nearby.sort((a,b)=>a.d-b.d)[0];
+  if(lastAuto!==s.id){
+   lastAuto=s.id;
+   document.getElementById('gpsStatus').textContent=`Вы рядом: ${s.name}. Нажмите «Открыть рассказ».`;
+   openStop(s.id);
+  }
+ } else { lastAuto=null; }
+}
+function startGPS(){
+ if(!navigator.geolocation){document.getElementById('gpsStatus').textContent='Геолокация не поддерживается.';return}
+ if(!window.isSecureContext){document.getElementById('gpsStatus').textContent='Для GPS требуется защищённый HTTPS-адрес.';return}
+ if(watchId!==null)navigator.geolocation.clearWatch(watchId);
+ watchId=navigator.geolocation.watchPosition(onPosition,e=>{
+  document.getElementById('gpsStatus').textContent='Не удалось получить геопозицию: '+e.message;
+ },{enableHighAccuracy:true,maximumAge:3000,timeout:15000});
+}
+document.getElementById('locate').onclick=startGPS;
+document.getElementById('reset').onclick=()=>{localStorage.removeItem('sd_visited');visited.clear();lastAuto=null;render();document.getElementById('gpsStatus').textContent='Прогресс теста сброшен.'};
+render();
+if(window.Telegram?.WebApp){Telegram.WebApp.ready();Telegram.WebApp.expand();}
+</script>
+</body></html>
